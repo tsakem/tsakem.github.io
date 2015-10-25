@@ -1,0 +1,146 @@
+---
+title: "Machine Learning Algorithm for Activity Recognition of Weight Lifting Exercises"
+author: "Aimilia Tsakiri"
+date: "20 October 2015"
+output: html_document
+---
+
+##Executive Summary
+The goal of his analysis is to try to predict how well a weight lifting exercise is performed. The dataset is made from meassurements from devices such as Jawbone Up, Nike FuelBand, and Fitbit
+and more specific from data collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+
+##Analysis
+
+###Cross Validation
+In order to build our machine learning algorithm we have to subsplit the training data into training and test data. This will allow us to test different models and estimate their errors and at the end pick the method that will be used for the provided validation data.
+
+```{r warning=FALSE}
+
+##libraries
+library(caret)
+library(kernlab)
+
+
+##read the data from csv
+total_training<- read.csv(file="pml-training.csv", header=TRUE, sep=",",na.strings = c("NA",""))
+validation_data<- read.csv(file="pml-testing.csv",header=TRUE,sep=",",na.strings = c("NA",""))
+
+##Convert Factors to Numeric
+asNumeric <- function(x) as.numeric(as.character(x))
+factorsNumeric <- function(d) modifyList(d, lapply(d[, sapply(d, is.factor)],   
+                                                   asNumeric))
+total_training[,8:159] <- factorsNumeric(total_training[,8:159])
+validation_data[,8:159] <- factorsNumeric(validation_data[,8:159])
+```
+
+###Data cleaning
+
+```{r}
+summary(total_training)
+```
+It was observed in summary function that there are a lot of variables with NA values. A simple way to detect and remove these data, is the following simple assumption: In case more than 95% of the values of a column is NAs then this column will not be included in the prediction model.
+
+```{r}
+##Data Cleaning
+columns_to_keep<-names(total_training[, colSums(is.na(total_training)) <0.95* nrow(total_training)])
+columns_to_keep_index<-which(names(total_training)%in%columns_to_keep)
+```
+
+Additionally, the first 7 columns should not be included since the data that they include are more of a snapshot of the status of the participant and the experiment, than measurements that would provide valuable information to the training model.
+
+
+```{r}
+
+propercolumns<-columns_to_keep_index[-c(1,3:7)]
+
+##Define the final variables to be included in the model
+thetrainingdata<-total_training[,propercolumns]
+
+
+##Cross-Validation - Sub split training data to test and train data
+set.seed(7777)
+intrain <-createDataPartition(y=thetrainingdata$classe,p=0.7,list=FALSE)
+training<-thetrainingdata[intrain,]
+testing<-thetrainingdata[-intrain,]
+
+```
+
+###Model Selection
+Two different models will be analysed with and without preprocessing of the data in order to cover for both linearity of the relationship and for non linear relationship.
+
+####Linear Discriminant Analysis
+```{r}
+
+##1st model
+modelFit1<-train(classe~.,method="lda",preProcess="pca", data=training)
+modelFit1
+
+##Predict on test sample
+predict.mf1<-predict(modelFit1,testing)
+testing$predictRight.mf1<-predict.mf1==testing$classe
+table(predict.mf1,testing$classe)
+
+##1st model - no preprocessing
+modelFit1b<-train(classe~.,method="lda", data=training)
+modelFit1b
+
+##Predict on test sample
+predict.mf1b<-predict(modelFit1b,testing)
+testing$predictRight.mf1b<-predict.mf1b==testing$classe
+table(predict.mf1b,testing$classe)
+```
+It is interesting that the training without the preprocessing of Principal Component Analysis give a highier accuraccy, which lead us to check for non linear relationship between the data. This is the reason that Random Forest Analysis is believed to provide more accurate results to the classification.
+
+####Random Forest Analysis
+
+**Important Note: Due to the highly time consuming trainig process, the models were saved with saveRDS method and are recalled in the code (in order to knit the HTMLs in a fast and efficient way)
+```{r}
+
+##2nd model - RandomForest with preProcessing
+
+##modelFit2<-train(classe~.,method="rf",prox=TRUE,preProcess="pca", data=training)
+modelFit2<-readRDS("rfmodelFit2withpca.rds")
+modelFit2
+
+##Predict on test sample
+predict.mf2<-predict(modelFit2,testing)
+testing$predictRight.mf2<-predict.mf2==testing$classe
+table(predict.mf2,testing$classe)
+
+
+##2nd model - RandomForest without preProcessing
+
+##modelFit2b<-train(classe~.,method="rf",prox=TRUE, data=training)
+modelFit2b<-readRDS("rfmodelFitnopca.rds")
+modelFit2b
+
+##Predict on test sample
+predict.mf2b<-predict(modelFit2b,testing)
+testing$predictRight.mf2b<-predict.mf2b==testing$classe
+table(predict.mf2b,testing$classe)
+
+```
+
+Random Forest algorithm seems to give by far better accuracy than Linear Discriminant Analysis. Also, the training without preprocessing gives even more better accuracy that reaches 99%.
+So the selected model will be modelFit2b with the following OOB estimate of error rate and characteristics:
+
+```{r}
+modelFit2b$finalModel
+```
+
+Additionally, in order to check if a "lighter" model with less variables could actually provide high accuracy with higher speed we can check for high differences in the importance of the variables .
+
+```{r}
+ROCImp<-varImp(modelFit2b,scale=FALSE)
+ROCImp$importance
+```
+It seems that 7 variables are the ones that affect highly the model but most of the variables are having a pretty good importance. The only exception is user_name that it seems that it could be excluded from the model without causing any problems to the accuracy of the model. Since it is just one variable we will not excluded it since it will  not really affect significantly the speed of the algorithm.The reason that it was initially included in the variables set is the possible need of preprocessing of the data that the characteristics of each person might affected the model.
+
+
+##Predictions
+The final predictions for the validation test that is provided are the following:
+```{r}
+final.predict<-predict(modelFit2b,validation_data)
+final.predict
+```
